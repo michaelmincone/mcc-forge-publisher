@@ -1,0 +1,18 @@
+.DS_Store
+
+# Build output
+.build/
+build/
+
+# Reverse-engineering workspace and evidence stay on this Mac; only the protocol specs are published.
+investigation/
+research/*
+!research/AUTH_SPEC.md
+!research/UPLOAD_SPEC.md
+!research/DOWNLOAD_FINDINGS.md
+
+# Game files and map variants are never committed.
+*.mvar
+*.bin
+*.exe
+*.dll
