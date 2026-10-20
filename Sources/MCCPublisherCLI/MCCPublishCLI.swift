@@ -8,6 +8,14 @@ struct MCCPublishCLI {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
+            if args == ["list"] {
+                try await browseOwnShare()
+                return
+            }
+            if args.count == 3, args[0] == "download" {
+                try await browseOwnShare(itemID: args[1], destination: URL(fileURLWithPath: args[2]))
+                return
+            }
             if args.count == 3, args[0] == "upload-control" {
                 let map = try ReachMapDocument.load(from: URL(fileURLWithPath: args[1]))
                 try await uploadControl(map, title: args[2])
@@ -21,6 +29,8 @@ struct MCCPublishCLI {
             guard args.count == 2, ["inspect", "verify-own", "repair-own-filename", "repair-catalog-filename"].contains(args[0]) else {
                 print("Usage: mcc-publish inspect /absolute/path/to/map.mvar")
                 print("       mcc-publish verify-own /absolute/path/to/map.mvar (read-only)")
+                print("       mcc-publish list (read-only File Share browser)")
+                print("       mcc-publish download ITEM_ID /absolute/path/to/map.mvar")
                 print("Sign-in and publishing are available in MCC Forge Publisher.app.")
                 return
             }
@@ -38,6 +48,48 @@ struct MCCPublishCLI {
             print(String(decoding: try result.encoded(), as: UTF8.self))
         } catch {
             FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1)
+        }
+    }
+
+    /// Uses the same core browser as the app, without writing credentials or publication receipts.
+    private static func browseOwnShare(itemID: String? = nil, destination: URL? = nil) async throws {
+        guard let account = try await AuthService(persistsCredentials: false).restoreSession() else {
+            throw PublisherError.authentication("Sign in using the native app first.")
+        }
+        let http = HTTPClient()
+        let services = try await ServiceDiscovery(http: http).resolve(account: account, saved: nil)
+        let service = FileShareService(http: http)
+        let listing = try await service.list(credentials: account, services: services)
+        if let itemID, let destination {
+            guard destination.pathExtension.lowercased() == "mvar" else {
+                throw PublisherError.invalidMap("Choose a destination with the .mvar extension.")
+            }
+            guard !FileManager.default.fileExists(atPath: destination.path) else {
+                throw PublisherError.service("The destination already exists. Choose another filename.")
+            }
+            guard let item = listing.items.first(where: { $0.id == itemID }) else {
+                throw PublisherError.service(listing.isComplete ? "That map is not on this account's File Share." : "That map was not found in the incomplete File Share results. Refresh in the app.")
+            }
+            let downloaded = try await service.download(item: item, credentials: account, services: services)
+            try downloaded.save(to: destination)
+            print(String(decoding: try JSONValue.object([
+                "savedPath": .string(destination.path), "bytes": .number(Double(downloaded.data.count)),
+                "sha256": .string(downloaded.sha256), "itemID": .string(item.id)
+            ]).encoded(), as: UTF8.self))
+        } else {
+            let items = listing.items.map { item in
+                JSONValue.object([
+                    "id": .string(item.id), "title": .string(item.title),
+                    "game": item.game.map { .string($0) } ?? .null,
+                    "baseMap": item.baseMap.map { .string($0) } ?? .null,
+                    "fileBytes": item.fileSize.map { .number(Double($0)) } ?? .null,
+                    "modifiedAt": item.modifiedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null
+                ])
+            }
+            print(String(decoding: try JSONValue.object([
+                "complete": .bool(listing.isComplete), "warning": listing.warning.map { .string($0) } ?? .null,
+                "items": .array(items)
+            ]).encoded(), as: UTF8.self))
         }
     }
 

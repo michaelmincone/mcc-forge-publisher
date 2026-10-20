@@ -10,7 +10,9 @@ mcc_test_sources=("$mcc_test_root"/Sources/MCCPublisherCore/*.swift)
 for mcc_test_spec in \
     'REACH_STANDALONE_TESTS:ReachMapTests.swift:reach' \
     'AUTH_STANDALONE_TESTS:AuthTests.swift:auth' \
-    'PUBLICATION_STANDALONE_TESTS:PublicationTests.swift:publication'; do
+    'PUBLICATION_STANDALONE_TESTS:PublicationTests.swift:publication' \
+    'FILESHARE_STANDALONE_TESTS:FileShareTests.swift:fileshare' \
+    'FILESHARE_DELETION_STANDALONE_TESTS:FileShareDeletionTests.swift:fileshare-deletion'; do
     IFS=: read -r mcc_test_flag mcc_test_file mcc_test_name <<< "$mcc_test_spec"
     swiftc -parse-as-library -D "$mcc_test_flag" -I "$mcc_test_root/Sources/CZlib" \
         "${mcc_test_sources[@]}" "$mcc_test_root/Tests/MCCPublisherCoreTests/$mcc_test_file" \
@@ -23,3 +25,9 @@ swiftc -parse-as-library -D HISTORY_STANDALONE_TESTS -I "$mcc_test_root/Sources/
     "$mcc_test_root/Tests/MCCPublisherAppTests/PublicationHistoryTests.swift" \
     -o "$mcc_test_run/history-tests"
 "$mcc_test_run/history-tests"
+
+swiftc -parse-as-library -D DELETION_JOURNAL_STANDALONE_TESTS -I "$mcc_test_root/Sources/CZlib" \
+    "${mcc_test_sources[@]}" "$mcc_test_root/Sources/MCCPublisherApp/PendingFileShareDeletions.swift" \
+    "$mcc_test_root/Tests/MCCPublisherAppTests/PendingFileShareDeletionsTests.swift" \
+    -o "$mcc_test_run/deletion-journal-tests"
+"$mcc_test_run/deletion-journal-tests"

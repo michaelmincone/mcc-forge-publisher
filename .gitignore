@@ -10,6 +10,8 @@ research/*
 !research/AUTH_SPEC.md
 !research/UPLOAD_SPEC.md
 !research/DOWNLOAD_FINDINGS.md
+!research/FILESHARE_SPEC.md
+!research/DELETION_SPEC.md
 
 # Game files and map variants are never committed.
 *.mvar

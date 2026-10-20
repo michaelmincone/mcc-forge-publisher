@@ -9,9 +9,11 @@ public struct HTTPResponse: Sendable {
 
 // Authenticated requests must never follow a redirect to another service host.
 private final class RedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let allowsRedirects: Bool
+    init(allowsRedirects: Bool = true) { self.allowsRedirects = allowsRedirects }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard let original = task.originalRequest?.url, let target = request.url,
+        guard allowsRedirects, let original = task.originalRequest?.url, let target = request.url,
               HTTPClient.permitsRedirect(from: original, to: target) else {
             completionHandler(nil); return
         }
@@ -36,19 +38,23 @@ public struct HTTPClient: Sendable {
         (original.port ?? 443) == (target.port ?? 443) &&
         target.user == nil && target.password == nil
     }
-    public func send(url: URL, method: String, headers: [String: String] = [:], body: Data? = nil) async throws -> HTTPResponse {
+    public func send(url: URL, method: String, headers: [String: String] = [:], body: Data? = nil,
+                     allowsRedirects: Bool = true) async throws -> HTTPResponse {
         guard url.scheme == "https", url.user == nil, url.password == nil else {
             throw PublisherError.protocolError("The service URL must use HTTPS without embedded credentials.")
         }
         var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body
         request.setValue("MjolnirPublisher/0.1 (macOS)", forHTTPHeaderField: "User-Agent")
         for (key, value) in headers {
-            guard !key.contains("\r"), !key.contains("\n"), !value.contains("\r"), !value.contains("\n") else {
+            guard !key.utf8.contains(13), !key.utf8.contains(10), !value.utf8.contains(13), !value.utf8.contains(10) else {
                 throw PublisherError.protocolError("A request header contains an invalid line break.")
             }
             request.setValue(value, forHTTPHeaderField: key)
         }
-        let (stream, response) = try await session.bytes(for: request)
+        // Destructive operations can prohibit even same-origin redirects, which
+        // otherwise may replay a POST at a new endpoint after HTTP 307/308.
+        let policy = RedirectPolicy(allowsRedirects: allowsRedirects)
+        let (stream, response) = try await session.bytes(for: request, delegate: policy)
         let limit = 17 * 1024 * 1024
         guard response.expectedContentLength <= Int64(limit) else {
             throw PublisherError.service("The service response exceeds the allowed size.")

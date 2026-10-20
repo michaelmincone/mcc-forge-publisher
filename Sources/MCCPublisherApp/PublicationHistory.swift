@@ -46,6 +46,26 @@ struct PublicationHistory {
         updated.append(entry)
         // A failed disk write must still prevent duplicate uploads during this app session.
         entries = updated
+        try persist(updated)
+    }
+
+    /// Retire only a catalog entry whose absence the deletion service confirmed.
+    /// Persist first: a failed cleanup keeps duplicate protection in memory and
+    /// can be retried without sending another remote deletion.
+    mutating func removeConfirmedDeletion(_ result: FileShareDeletionResult) throws {
+        guard result.confirmedAbsent, UInt64(result.accountXUID) != nil,
+              UUID(uuidString: result.itemID) != nil, !result.accountEntityID.isEmpty else {
+            throw PublisherError.protocolError("Publication history can only be updated after this account's map is confirmed absent.")
+        }
+        let updated = entries.filter {
+            !($0.accountXUID == result.accountXUID && $0.receipt.itemID.caseInsensitiveCompare(result.itemID) == .orderedSame)
+        }
+        guard updated.count != entries.count else { return }
+        try persist(updated)
+        entries = updated
+    }
+
+    private func persist(_ updated: [Entry]) throws {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
