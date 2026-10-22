@@ -9,6 +9,7 @@ mcc_test_sources=("$mcc_test_root"/Sources/MCCPublisherCore/*.swift)
 
 for mcc_test_spec in \
     'REACH_STANDALONE_TESTS:ReachMapTests.swift:reach' \
+    'GAME_VARIANT_STANDALONE_TESTS:GameVariantTests.swift:game-variants' \
     'AUTH_STANDALONE_TESTS:AuthTests.swift:auth' \
     'PUBLICATION_STANDALONE_TESTS:PublicationTests.swift:publication' \
     'FILESHARE_STANDALONE_TESTS:FileShareTests.swift:fileshare' \
@@ -31,3 +32,5 @@ swiftc -parse-as-library -D DELETION_JOURNAL_STANDALONE_TESTS -I "$mcc_test_root
     "$mcc_test_root/Tests/MCCPublisherAppTests/PendingFileShareDeletionsTests.swift" \
     -o "$mcc_test_run/deletion-journal-tests"
 "$mcc_test_run/deletion-journal-tests"
+
+"$mcc_test_root/scripts/test-library-model.sh"

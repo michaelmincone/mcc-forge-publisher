@@ -16,29 +16,40 @@ public struct FileShareItem: Identifiable, Sendable, Equatable {
     public let accountXUID: String
     public let gameEngine: String?
     public let baseMapID: String?
-    public var suggestedFilename: String { Self.filename(title: title, id: id) }
+    public let kind: VariantKind
+    /// The client-generated filename identifies an interrupted upload independently
+    /// of its server catalog ID, allowing read-only reconciliation after restart.
+    public let protocolFileName: String?
+    public var suggestedFilename: String { Self.filename(title: title, id: id, kind: kind) }
+    public func matches(search: String) -> Bool {
+        let terms = search.split(whereSeparator: \.isWhitespace)
+        let text = [title, description, game ?? "", baseMap ?? "", id, kind.label].joined(separator: " ")
+        return terms.allSatisfy { text.localizedStandardContains(String($0)) }
+    }
 
     /// Reconstruct catalog identity for display or a read-only state check.
     /// A snapshot is never evidence of current ownership or deletion success;
     /// mutating services must validate fresh remote metadata independently.
     public init(id: String, title: String, description: String = "", game: String? = nil, baseMap: String? = nil,
                 fileSize: Int? = nil, modifiedAt: Date? = nil, accountEntityID: String, accountXUID: String,
-                gameEngine: String? = nil, baseMapID: String? = nil) {
+                gameEngine: String? = nil, baseMapID: String? = nil, kind: VariantKind = .map, protocolFileName: String? = nil) {
         self.id = id; self.title = title; self.description = description; self.game = game; self.baseMap = baseMap
         self.fileSize = fileSize; self.modifiedAt = modifiedAt; self.accountEntityID = accountEntityID
-        self.accountXUID = accountXUID; self.gameEngine = gameEngine; self.baseMapID = baseMapID
+        self.accountXUID = accountXUID; self.gameEngine = gameEngine; self.baseMapID = baseMapID; self.kind = kind
+        self.protocolFileName = protocolFileName
     }
 
-    static func filename(title: String, id: String) -> String {
+    static func filename(title: String, id: String, kind: VariantKind = .map) -> String {
         let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:"))
         var name = title.unicodeScalars.map { forbidden.contains($0) ? "_" : String($0) }.joined()
         name = name.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
-        if name.lowercased().hasSuffix(".mvar") { name.removeLast(5) }
-        if name.isEmpty { name = "Map Variant" }
+        let ext = "." + kind.fileExtension
+        if name.lowercased().hasSuffix(ext) { name.removeLast(ext.count) }
+        if name.isEmpty { name = kind == .map ? "Map Variant" : "Game Variant" }
         // Leave room for a stable suffix, extension and the filesystem's byte limit.
         while name.utf8.count > 160 { name.removeLast() }
         let suffix = id.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }.prefix(36)
-        return name + (suffix.isEmpty ? "" : " - " + suffix) + ".mvar"
+        return name + (suffix.isEmpty ? "" : " - " + suffix) + ext
     }
 }
 
@@ -46,7 +57,7 @@ public struct FileShareListing: Sendable, Equatable {
     public let items: [FileShareItem]
     public let isComplete: Bool
     public let warning: String?
-    /// Includes all content types, before the map-only browser filter.
+    /// Includes all content types, before the map/gametype browser filter.
     public let catalogItemCount: Int
 }
 
@@ -56,19 +67,20 @@ public struct FileShareDownload: Sendable {
     public let data: Data
     public let sha256: String
     public let itemID: String
+    public let kind: VariantKind
 
-    init(data: Data, itemID: String) throws {
-        try MapVariantDownloadValidator.validate(data)
+    init(data: Data, itemID: String, kind: VariantKind = .map) throws {
+        try MapVariantDownloadValidator.validate(data, kind: kind)
         self.data = data
         self.sha256 = Self.hash(data)
-        self.itemID = itemID
+        self.itemID = itemID; self.kind = kind
     }
 
     /// Stage, verify and sync in the destination directory, then atomically rename.
     /// A failed stage cannot truncate an existing destination or leave a .mvar.
     public func save(to destination: URL) throws {
-        guard destination.isFileURL, destination.pathExtension.lowercased() == "mvar" else {
-            throw PublisherError.service("Choose a local destination with the .mvar extension.")
+        guard destination.isFileURL, destination.pathExtension.lowercased() == kind.fileExtension else {
+            throw PublisherError.service("Choose a local destination with the .\(kind.fileExtension) extension.")
         }
         let manager = FileManager.default
         let stage = destination.deletingLastPathComponent().appendingPathComponent(".mcc-download-\(UUID().uuidString).tmp")
@@ -80,7 +92,7 @@ public struct FileShareDownload: Sendable {
         catch { try? handle.close(); throw error }
         let staged = try Data(contentsOf: stage)
         guard staged.count == data.count, Self.hash(staged) == sha256 else {
-            throw PublisherError.service("The staged map failed its byte-integrity check; no map was saved.")
+            throw PublisherError.service("The staged file failed its byte-integrity check; no file was saved.")
         }
         try Task.checkCancellation()
         let result = stage.withUnsafeFileSystemRepresentation { source in
@@ -125,7 +137,7 @@ public struct FileShareService: Sendable {
         var seen: [String: JSONValue] = [:]
         for row in rows {
             guard row.object != nil, let id = Self.itemID(row), let type = row["ContentType"].string, !type.isEmpty else {
-                warnings.append("MCC returned an invalid catalog entry; some maps may be missing."); continue
+                warnings.append("MCC returned an invalid catalog entry; some files may be missing."); continue
             }
             if let prior = seen[id] {
                 if prior != row { warnings.append("MCC returned conflicting entries for the same catalog ID; refresh the list.") }
@@ -135,7 +147,7 @@ public struct FileShareService: Sendable {
             guard row["CreatorEntity"]["Id"].string == credentials.entityId else {
                 warnings.append("MCC returned an entry whose ownership could not be confirmed for this account; it was omitted."); continue
             }
-            guard type == "MapVariant" else { continue }
+            guard VariantKind(catalogContentType: type) != nil else { continue }
             items.append(Self.item(row, credentials: credentials))
         }
         if seen.count != rows.count { warnings.append("The response included duplicate or malformed catalog entries, so completeness could not be confirmed.") }
@@ -153,47 +165,50 @@ public struct FileShareService: Sendable {
 
     public func download(item: FileShareItem, credentials: SignedInAccount, services: MCCServiceConfiguration) async throws -> FileShareDownload {
         guard item.accountEntityID == credentials.entityId, item.accountXUID == credentials.xuid else {
-            throw PublisherError.authentication("This map belongs to a different signed-in account. Refresh your File Share.")
+            throw PublisherError.authentication("This file belongs to a different signed-in account. Refresh your File Share.")
         }
         // A CDN URL may expire while the list is open. Retrieve it at download
         // time, and on an explicit expiry refusal retrieve fresh metadata once.
         for attempt in 0...1 {
             let raw = try await details(itemID: item.id, credentials: credentials, services: services)
+            guard raw["ContentType"].string == item.kind.catalogContentType else {
+                throw PublisherError.protocolError("MCC returned a different file type. Refresh the file list.")
+            }
             let url = try Self.contentURL(raw)
             do {
                 let response = try await request(url: url, method: "GET")
                 let mime = response.headers["content-type"]?.lowercased() ?? ""
                 guard !mime.contains("json"), !mime.contains("html"), !mime.contains("xml") else {
-                    throw PublisherError.protocolError("The content server returned an error document instead of a map. Refresh the File Share and try again.")
+                    throw PublisherError.protocolError("The content server returned an error document instead of a file. Refresh the File Share and try again.")
                 }
-                return try FileShareDownload(data: response.data, itemID: item.id)
+                return try FileShareDownload(data: response.data, itemID: item.id, kind: item.kind)
             } catch let failure as HTTPStatusError where [401, 403].contains(failure.status) {
                 if attempt == 0 { continue }
-                throw PublisherError.service("The map's download link has expired. Refresh your File Share or sign in again.")
+                throw PublisherError.service("The file's download link has expired. Refresh your File Share or sign in again.")
             }
         }
-        throw PublisherError.service("The map's download link has expired. Refresh your File Share or sign in again.")
+        throw PublisherError.service("The file's download link has expired. Refresh your File Share or sign in again.")
     }
 
     private func details(itemID: String, credentials: SignedInAccount, services: MCCServiceConfiguration) async throws -> JSONValue {
         try Self.validate(credentials)
-        guard UUID(uuidString: itemID) != nil else { throw PublisherError.protocolError("The selected map has an invalid catalog ID. Refresh the File Share.") }
+        guard UUID(uuidString: itemID) != nil else { throw PublisherError.protocolError("The selected file has an invalid catalog ID. Refresh the File Share.") }
         try MCCServiceConfiguration.validate(services.itemLookup)
         let response = try await request(url: services.itemLookup, method: "POST", headers: [
             "X-EntityToken": credentials.entityToken, "Accept": "application/json", "Content-Type": "application/json",
         ], body: JSONValue.object(["ItemId": .string(itemID)]).encoded())
         let body = try Self.envelope(response.json)
         let raw = body["Item"]
-        guard raw.object != nil else { throw PublisherError.service("This map is no longer available on the File Share. Refresh the list.") }
-        guard Self.itemID(raw) == itemID.lowercased(), raw["ContentType"].string == "MapVariant",
+        guard raw.object != nil else { throw PublisherError.service("This file is no longer available on the File Share. Refresh the list.") }
+        guard Self.itemID(raw) == itemID.lowercased(), VariantKind(catalogContentType: raw["ContentType"].string ?? "") != nil,
               raw["CreatorEntity"]["Id"].string == credentials.entityId else {
-            throw PublisherError.protocolError("MCC returned a different map or could not confirm that this account owns it. Refresh the File Share.")
+            throw PublisherError.protocolError("MCC returned a different file or could not confirm that this account owns it. Refresh the File Share.")
         }
         return raw
     }
 
     private static func contentURL(_ raw: JSONValue) throws -> URL {
-        guard let contents = raw["Contents"].array else { throw PublisherError.protocolError("This map has no downloadable data content.") }
+        guard let contents = raw["Contents"].array else { throw PublisherError.protocolError("This file has no downloadable data content.") }
         let dataContents = contents.filter { $0["Type"].string == "data" }
         // Older Xbox-migrated map items were observed with one untyped Url
         // instead of Type=data. Permit only one unambiguous untyped candidate;
@@ -203,7 +218,7 @@ public struct FileShareService: Sendable {
         guard candidates.count == 1, let content = candidates.first,
               let address = content["Url"].string ?? content["DownloadUrl"].string,
               let url = URL(string: address), trustedDownloadURL(url) else {
-            throw PublisherError.protocolError("This map did not provide one recognized HTTPS map-data download URL. A thumbnail cannot be saved as a map.")
+            throw PublisherError.protocolError("This file did not provide one recognized HTTPS file-data download URL. A thumbnail cannot be saved as a variant.")
         }
         return url
     }
@@ -297,30 +312,34 @@ public struct FileShareService: Sendable {
             date = formatter.date(from: value)
             if date == nil { formatter.formatOptions = [.withInternetDateTime]; date = formatter.date(from: value) }
         }
-        return FileShareItem(id: itemID(row)!, title: localized(row["Title"]) ?? "Untitled Map", description: localized(row["Description"]) ?? "",
+        let kind = VariantKind(catalogContentType: row["ContentType"].string ?? "") ?? .map
+        return FileShareItem(id: itemID(row)!, title: localized(row["Title"]) ?? "Untitled \(kind.label)", description: localized(row["Description"]) ?? "",
             game: game, baseMap: baseMap, fileSize: size, modifiedAt: date, accountEntityID: credentials.entityId,
-            accountXUID: credentials.xuid, gameEngine: engine, baseMapID: mapID)
+            accountXUID: credentials.xuid, gameEngine: engine, baseMapID: mapID, kind: kind,
+            protocolFileName: p["FileName"].string.flatMap { UUID(uuidString: $0)?.uuidString.lowercased() })
     }
 }
 
 /// Structural export validation deliberately does not use the Reach upload
-/// parser: MCC's other games and Reach versions use different map bodies.
+/// parser: MCC's other games and Reach versions use different file bodies.
 /// Inflate only for inspection, then preserve the entire original byte buffer.
 enum MapVariantDownloadValidator {
     static let maximumSize = 16 * 1024 * 1024
-    static func validate(_ data: Data) throws {
-        guard !data.isEmpty, data.count <= maximumSize else { throw invalid("The map is empty or exceeds the 16 MB limit.") }
+    static func validate(_ data: Data, kind: VariantKind = .map) throws {
+        guard !data.isEmpty, data.count <= maximumSize else { throw invalid("The file is empty or exceeds the 16 MB limit.") }
         let bytes = [UInt8](data)
         guard bytes.count >= 48, String(bytes: bytes.prefix(4), encoding: .ascii) == "_blf" else {
             throw invalid("The server did not return an MCC BLF map file. No file was saved.")
         }
         var state = State()
         try scan(bytes, outer: true, depth: 0, state: &state)
-        guard state.mapChunks == 1 else { throw invalid("The downloaded file does not contain exactly one map-variant payload.") }
+        guard (kind == .map ? state.mapChunks == 1 && state.gameChunks == 0 : state.gameChunks == 1 && state.mapChunks == 0) else {
+            throw invalid("The downloaded file does not contain exactly one \(kind.label.lowercased()) payload matching its catalog type.")
+        }
     }
-    private struct State { var mapChunks = 0; var expanded = 0 }
+    private struct State { var mapChunks = 0; var gameChunks = 0; var expanded = 0 }
     private static func scan(_ bytes: [UInt8], outer: Bool, depth: Int, state: inout State) throws {
-        guard depth <= 4 else { throw invalid("The map's compressed chunks are nested too deeply.") }
+        guard depth <= 4 else { throw invalid("The file's compressed chunks are nested too deeply.") }
         var offset = 0, ended = false
         while offset < bytes.count {
             // Some authentic local files contain physical zero padding after EOF.
@@ -339,8 +358,11 @@ enum MapVariantDownloadValidator {
                 case "mvar", "mapv":
                     guard size > 12 else { throw invalid("The downloaded map-variant payload is empty.") }
                     state.mapChunks += 1
+                case "mpvr", "gvar":
+                    guard size > 12 else { throw invalid("The downloaded game-variant payload is empty.") }
+                    state.gameChunks += 1
                 case "_cmp":
-                    guard size >= 17, bytes[offset + 12] == 0 else { throw invalid("The map uses an unsupported compressed BLF wrapper.") }
+                    guard size >= 17, bytes[offset + 12] == 0 else { throw invalid("The file uses an unsupported compressed BLF wrapper.") }
                     let length = Int(be32(bytes, offset + 13))
                     guard length > 0, length <= maximumSize - state.expanded else { throw invalid("The expanded map exceeds the 16 MB limit.") }
                     state.expanded += length

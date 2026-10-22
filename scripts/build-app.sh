@@ -5,6 +5,7 @@ source "$TASK_ROOT/scripts/signing.sh"
 swift build --package-path "$TASK_ROOT" -c release -j 2 --product MCCForgePublisher
 TASK_BIN=$(swift build --package-path "$TASK_ROOT" -c release --show-bin-path)
 TASK_FINAL="$TASK_ROOT/build/MCC Forge Publisher.app"
+mkdir -p "$TASK_ROOT/build"
 # Assemble beside the old bundle and swap it in, so a running copy keeps its own files.
 TASK_STAGE=$(mktemp -d "$TASK_ROOT/build/.staging.XXXXXX")
 trap 'rm -rf -- "$TASK_STAGE"' EXIT
@@ -30,12 +31,22 @@ cat > "$TASK_APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleTypeRole</key><string>Viewer</string>
 <key>LSHandlerRank</key><string>Alternate</string>
 <key>LSItemContentTypes</key><array><string>org.mjolnir.reach-map-variant</string></array>
+</dict><dict>
+<key>CFBundleTypeName</key><string>Halo Reach Gametype</string>
+<key>CFBundleTypeRole</key><string>Viewer</string>
+<key>LSHandlerRank</key><string>Alternate</string>
+<key>LSItemContentTypes</key><array><string>org.mjolnir.reach-game-variant</string></array>
 </dict></array>
 <key>UTExportedTypeDeclarations</key><array><dict>
 <key>UTTypeIdentifier</key><string>org.mjolnir.reach-map-variant</string>
 <key>UTTypeConformsTo</key><array><string>public.data</string></array>
 <key>UTTypeDescription</key><string>Halo Reach Forge Map</string>
 <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>mvar</string></array></dict>
+</dict><dict>
+<key>UTTypeIdentifier</key><string>org.mjolnir.reach-game-variant</string>
+<key>UTTypeConformsTo</key><array><string>public.data</string></array>
+<key>UTTypeDescription</key><string>Halo Reach Gametype</string>
+<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>bin</string><string>game</string></array></dict>
 </dict></array>
 </dict></plist>
 PLIST

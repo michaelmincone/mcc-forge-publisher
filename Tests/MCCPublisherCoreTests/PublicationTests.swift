@@ -16,10 +16,28 @@ final class PublicationTests: XCTestCase {
     func testMaliciousEndpointsCannotReceiveCredentials() throws { try PublicationCases.endpoints() }
     func testDiscoveryRejectsAuthorityAndPathInjection() throws { try PublicationCases.discoveryInjection() }
     func testRedirectsRequireTheSameHTTPSOrigin() throws { try PublicationCases.redirects() }
+    func testPublicationRefusalsAndUncertainDispatches() async throws { try await PublicationCases.dispatch() }
 }
 #endif
 
 #if canImport(XCTest) || PUBLICATION_STANDALONE_TESTS
+private final class PublicationProtocol: URLProtocol, @unchecked Sendable {
+    struct Reply { var data = Data(); var status = 200 }
+    static var handler: ((URLRequest) throws -> Reply)?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            guard let handler = Self.handler else { throw URLError(.badServerResponse) }
+            let reply = try handler(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: [:])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: reply.data); client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+    override func stopLoading() {}
+}
+
 private enum PublicationCases {
     private struct Failure: Error, CustomStringConvertible { let description: String }
     private static func check(_ condition: Bool, _ message: String) throws {
@@ -35,6 +53,44 @@ private enum PublicationCases {
     private static func services() throws -> MCCServiceConfiguration {
         try MCCServiceConfiguration(upload: URL(string: "https://mcc-production.azurefd.net/test/upload")!,
             permission: URL(string: "https://mcc-production.azurefd.net/test/permission")!, source: "offline fixture")
+    }
+
+    static func dispatch() async throws {
+        let plan = try FreshMapMetadata.makePlan(map: fixture(mapID: 3006), account: account)
+        for mode in 0..<6 {
+            var uploads = 0
+            PublicationProtocol.handler = { request in
+                if request.url?.path == "/test/permission" {
+                    return .init(data: try JSONValue.object(["isAllowed": .bool(mode != 0)]).encoded())
+                }
+                uploads += 1
+                switch mode {
+                case 1: return .init(data: try JSONValue.object(["result": .string("deniedUpload")]).encoded())
+                case 2: return .init(status: 403)
+                case 3: throw URLError(.networkConnectionLost, userInfo: [NSLocalizedDescriptionKey: "SECRET_INTERNAL_ERROR"])
+                case 4: return .init(status: 503)
+                default: return .init(data: Data("{unreadable".utf8))
+                }
+            }
+            let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [PublicationProtocol.self]
+            let service = PublisherService(http: HTTPClient(session: URLSession(configuration: config)))
+            do {
+                _ = try await service.upload(plan: plan, credentials: account, services: services())
+                throw Failure(description: "Rejected/ambiguous upload returned success")
+            } catch let error as Failure { throw error }
+            catch {
+                if mode == 0 {
+                    try check(!(error is PublicationUploadError) && uploads == 0, "Permission refusal became an uncertain submitted upload")
+                } else {
+                    guard let upload = error as? PublicationUploadError else { throw Failure(description: "Post-dispatch outcome lost its explicit state") }
+                    switch upload.outcome {
+                    case .refused: try check([1, 2].contains(mode), "Lost/ambiguous reply was classified as safe refusal")
+                    case .uncertain: try check(mode >= 3, "Known refusal became uncertain")
+                    }
+                    try check(uploads == 1 && !upload.message.contains("SECRET_INTERNAL_ERROR"), "Upload was retried or leaked a transport error")
+                }
+            }
+        }
     }
 
     static func framing() throws {
@@ -244,7 +300,7 @@ private enum PublicationCases {
 #if PUBLICATION_STANDALONE_TESTS
 @main
 struct PublicationStandaloneTests {
-    static func main() throws {
+    static func main() async throws {
         try PublicationCases.framing()
         try PublicationCases.credentials()
         try PublicationCases.catalog()
@@ -255,7 +311,8 @@ struct PublicationStandaloneTests {
         try PublicationCases.endpoints()
         try PublicationCases.discoveryInjection()
         try PublicationCases.redirects()
-        print("Publication tests: 10 cases passed; native binary/UTF-8 framing, credentials, map catalog, provenance, authority transport, endpoint and redirect checks; no network.")
+        try await PublicationCases.dispatch()
+        print("Publication tests: 11 cases passed; explicit refusals and uncertain dispatch, native binary/UTF-8 framing, credentials, map catalog, provenance, authority transport, endpoint and redirect checks; no network.")
     }
 }
 #endif

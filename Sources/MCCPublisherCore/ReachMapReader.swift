@@ -14,6 +14,8 @@ public struct ReachMapDocument: Sendable {
     public let mapID: UInt32
     public let creatorXUID: String
     public let modifierXUID: String
+    public let creatorTimestamp: UInt64
+    public let editorTimestamp: UInt64
     public let contentUID: String
     public let bodyVersion: Int
     public let embeddedLength: Int
@@ -66,6 +68,8 @@ public struct ReachMapDocument: Sendable {
         self.mapID = headerMapID
         self.creatorXUID = String(Self.le64(header, 0x50))
         self.modifierXUID = String(Self.le64(header, 0x74))
+        self.creatorTimestamp = Self.le64(header, 0x48)
+        self.editorTimestamp = Self.le64(header, 0x6c)
         self.contentUID = String(Self.le64(header, 0x18))
         self.bodyVersion = body.version
         self.embeddedLength = physicalEnd

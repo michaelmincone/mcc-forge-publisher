@@ -13,6 +13,7 @@ final class FileShareTests: XCTestCase {
     func testErrorEnvelopesCannotLookEmpty() async throws { try await FileShareCases.envelopes() }
     func testDetailsAndDownloadAreBoundToAccountAndID() async throws { try await FileShareCases.binding() }
     func testDownloadSelectsMapDataAndPreservesAllBytes() async throws { try await FileShareCases.download() }
+    func testGametypeDownloadRetainsKindAndBytes() async throws { try await FileShareCases.gametypeDownload() }
     func testLegacyXboxContentMayBeUntyped() async throws { try await FileShareCases.legacyDownload() }
     func testExpiredCDNURLRefreshesDetailsOnce() async throws { try await FileShareCases.expiredURL() }
     func testMissingAmbiguousAndUnsafeDownloadURLs() async throws { try await FileShareCases.badContents() }
@@ -101,14 +102,29 @@ private enum FileShareCases {
             }
             let result = try await client.list(credentials: account, services: services())
             try check(result.isComplete && result.warning == nil && result.catalogItemCount == 3, "Valid response was not complete")
-            try check(result.items.count == 2 && result.items[0].title == result.items[1].title && result.items[0].id != result.items[1].id, "Duplicate titles lost stable identity")
-            try check(result.items.map(\.game) == ["Halo 3", "Halo 4"], "MCC API game mapping is wrong")
+            try check(result.items.count == 3 && result.items[0].title == result.items[1].title && result.items[0].id != result.items[1].id, "Duplicate titles lost stable identity")
+            try check(result.items.map(\.game) == ["Halo 3", "Halo 4", "Halo: Reach"] && result.items[2].kind == .gametype, "MCC API game mapping or gametype classification is wrong")
             try check(result.items[0].description == "Fixture description" && result.items[0].fileSize == 29481 && result.items[0].modifiedAt != nil, "Optional metadata was lost")
         }
         for request in requests {
             try check(request.httpMethod == "POST" && request.url?.path == "/test/list", "Browsing invoked an unrelated endpoint or remote mutation")
             try check(request.value(forHTTPHeaderField: "CreatorEntityId") == account.entityId && request.value(forHTTPHeaderField: "UserEntityId") == account.entityId, "Own-account listing headers were missing")
         }
+    }
+
+    static func gametypeDownload() async throws {
+        let source = service { _ in try reply(listBody([row(type: "GameVariant", title: "Arena Slayer")])) }
+        let item = try await source.list(credentials: account, services: services()).items[0]
+        var bytes = fixture(version: 137, fsm: true)
+        bytes.replaceSubrange(48 + 704..<48 + 704 + 4, with: "mpvr".utf8)
+        let client = service { request in
+            if request.url?.path == "/test/detail" { return try reply(.object(["Item": row(type: "GameVariant", contents: [dataContent()])])) }
+            return .init(data: bytes, headers: ["Content-Type": "application/octet-stream"])
+        }
+        let result = try await client.download(item: item, credentials: account, services: services())
+        try check(result.kind == .gametype && result.data == bytes && item.suggestedFilename.hasSuffix(".bin"), "Gametype catalog kind, game-independent version, or full bytes were lost")
+        let wrongType = service { _ in try reply(.object(["Item": row(type: "MapVariant", contents: [dataContent()])])) }
+        try await rejectsAsync("Catalog type changed after selection without rejection") { _ = try await wrongType.download(item: item, credentials: account, services: services()) }
     }
 
     static func completeness() async throws {
@@ -367,6 +383,7 @@ private enum FileShareCases {
         try await FileShareCases.envelopes()
         try await FileShareCases.binding()
         try await FileShareCases.download()
+        try await FileShareCases.gametypeDownload()
         try await FileShareCases.legacyDownload()
         try await FileShareCases.expiredURL()
         try await FileShareCases.badContents()
@@ -377,7 +394,7 @@ private enum FileShareCases {
         try await FileShareCases.filenames()
         try FileShareCases.configuration()
         try await FileShareCases.networkError()
-        print("File Share tests: 16 cases passed; mocked owned listing, completeness, continuation, identities, mixed games, trusted/legacy content, URL expiry, BLF/compression, exact bytes, atomic save, cancellation, safe filenames and settings; no live network or remote writes.")
+        print("File Share tests: 17 cases passed; mocked owned listing, gametypes, completeness, continuation, identities, mixed games, trusted/legacy content, URL expiry, BLF/compression, exact bytes, atomic save, cancellation, safe filenames and settings; no live network or remote writes.")
     }
 }
 #endif

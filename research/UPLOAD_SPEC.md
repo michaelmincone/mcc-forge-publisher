@@ -1,5 +1,7 @@
 # MCC Reach fresh-upload specification
 
+Path update (2026-10-21): existing checkout and tool references use the current `~/Documents/Halo_MCC/` layout. References to `real-mvar-samples/`, `maps/headstrong-star/` are historical artifacts absent from this checkout; examples requiring them are not ready to run. Recorded test results and literal historical default strings are unchanged.
+
 Reviewed 2026-10-12. This combines bounded static analysis of the **shipped MCC
 Windows client** with a legitimate-account native macOS sign-in and live upload.
 Microsoft/Xbox/PlayFab sign-in, upload permission, explicit upload success,
@@ -221,7 +223,7 @@ with success: require the explicit recognized success result and a returned
 file identity. The native success string is `success`; other table values are
 `deniedUpload`, `signatureNotValid`, and `anyError`.
 
-The bounded [post-upload audit](upload-finalize-audit.md) traced response
+The bounded post-upload audit (historical file: `upload-finalize-audit.md`; absent from this checkout) traced response
 completion through local identity/provenance updates, operation coordination,
 and the completed queue. It found no second catalog publish/finalization
 network request in the ordinary publication path. The final indirect
@@ -233,8 +235,8 @@ The working fresh uploads therefore do not add a speculative
 
 | Publication | Source | Catalog item | Verification |
 |---|---|---|---|
-| Headstrong - Original Control | `~/Local_Documents/Halo-MCC/forge/real-mvar-samples/0aaaf8c7-5ae6-43ba-bb4d-37c987f5e8b8.mvar` | `3c1ccd0e-5903-4d96-be82-7810f3676884` | `GetItemPublishStatus` succeeded; authenticated CDN core hash matched; user confirmed Xbox download |
-| Headstrong, edited export | `~/Local_Documents/Halo-MCC/forge/maps/headstrong-star/Headstrong_Star.mvar` | `ed150b45-48fe-4189-9d6d-d537819333e3` | Updated native GUI published it; **Check Download** verified exact core hash; user confirmed Xbox download |
+| Headstrong - Original Control | `~/Documents/Halo_MCC/mjolnir-forge-editor/forge-workspace/real-mvar-samples/0aaaf8c7-5ae6-43ba-bb4d-37c987f5e8b8.mvar` | `3c1ccd0e-5903-4d96-be82-7810f3676884` | `GetItemPublishStatus` succeeded; authenticated CDN core hash matched; user confirmed Xbox download |
+| Headstrong, edited export | `~/Documents/Halo_MCC/mjolnir-forge-editor/forge-workspace/maps/headstrong-star/Headstrong_Star.mvar` | `ed150b45-48fe-4189-9d6d-d537819333e3` | Updated native GUI published it; **Check Download** verified exact core hash; user confirmed Xbox download |
 
 Both cores are 29,481 bytes. The original-control core SHA-256 is
 `53d60e21eab7f2a3092199b9fb29aa592ab7b54edac660c39b1446aa37bce4fd`;
@@ -242,7 +244,7 @@ the edited core is
 `24ce68b51b3f1aae8a3da7fe0879fa6c07e0cb5d79029f008700dfda6181156e`.
 The source files and core bytes were not rewritten by publishing. Independent
 source hashes are preserved in
-[source-byte-comparison.json](reach-blob-audit/source-byte-comparison.json).
+source-byte-comparison.json (historical file: `reach-blob-audit/source-byte-comparison.json`; absent from this checkout).
 
 The user confirmed manually deleting the initial failed item
 `14001448-a0e0-49ca-a2f0-e8f2290e15b3`; that accounts for its later

@@ -1,5 +1,7 @@
 # File Share download investigation
 
+Path update (2026-10-21): existing checkout and tool references use the current `~/Documents/Halo_MCC/` layout. References to `real-mvar-samples/`, `maps/headstrong-star/` are historical artifacts absent from this checkout; examples requiring them are not ready to run. Recorded test results and literal historical default strings are unchanged.
+
 Read-only static evidence from the installed Windows MCC executable, SHA-256
 `be70d6dcd1a884f10ceb342a7a2dcb35ee0fa43181b66a1d19c3d830e9834691`,
 image base `0x140000000`. Bounded Ghidra decompilation uses saved exception-table
@@ -44,7 +46,7 @@ The Xbox executable has not been examined.
   that the incoming protocol FileName must parse as a UUID.
 - Native publication **does** use a lowercase dashed local UUID without an
   extension in both protocol FileName fields. The complete source chain is in
-  [filename-gate/findings.md](filename-gate/findings.md). A human basename was
+  filename-gate/findings.md (historical file: `filename-gate/findings.md`; absent from this checkout). A human basename was
   a confirmed mismatch with that publication path.
 - Reach map body decoder `0x18006d468` explicitly accepts body versions 31 and
   32 and has an upgrade path for version 31. Version 31 alone is not a demonstrated
@@ -105,16 +107,16 @@ for both the FileName header and `DisplayProperties.FileName`. Source author
 and editor fields remain separate; no map-body repair was made.
 
 The untouched control source was
-`~/Local_Documents/Halo-MCC/forge/real-mvar-samples/0aaaf8c7-5ae6-43ba-bb4d-37c987f5e8b8.mvar`.
+`~/Documents/Halo_MCC/mjolnir-forge-editor/forge-workspace/real-mvar-samples/0aaaf8c7-5ae6-43ba-bb4d-37c987f5e8b8.mvar`.
 Its 29,481-byte core SHA-256 is
 `53d60e21eab7f2a3092199b9fb29aa592ab7b54edac660c39b1446aa37bce4fd`.
 The edited source remained
-`~/Local_Documents/Halo-MCC/forge/maps/headstrong-star/Headstrong_Star.mvar`,
+`~/Documents/Halo_MCC/mjolnir-forge-editor/forge-workspace/maps/headstrong-star/Headstrong_Star.mvar`,
 with core SHA-256
 `24ce68b51b3f1aae8a3da7fe0879fa6c07e0cb5d79029f008700dfda6181156e`.
 Both published core hashes matched their respective sources. Source comparisons
 are preserved in
-[source-byte-comparison.json](reach-blob-audit/source-byte-comparison.json).
+source-byte-comparison.json (historical file: `reach-blob-audit/source-byte-comparison.json`; absent from this checkout).
 
 Content readback was separately corrected to consume `Contents[].Url` and
 accept the official `content1.prod.catalog.playfab.com` CDN host. That enabled
@@ -138,9 +140,9 @@ the now-working native request shape.
 
 Missing optional dates were not added to obtain success, and the core map
 bytes were not modified. The deeper Reach audit in
-[REACH_DOWNLOAD_VALIDITY.md](reach-blob-audit/REACH_DOWNLOAD_VALIDITY.md) found
+REACH_DOWNLOAD_VALIDITY.md (historical file: `reach-blob-audit/REACH_DOWNLOAD_VALIDITY.md`; absent from this checkout) found
 no concrete defect in core format/hash checks or installed Breakneck palette
-bounds. The [post-upload audit](upload-finalize-audit.md) found no second
+bounds. The post-upload audit (historical file: `upload-finalize-audit.md`; absent from this checkout) found no second
 catalog finalization request in the traced ordinary Windows publication path;
 the final indirect application callback and Xbox implementation remain outside
 that bounded trace.
