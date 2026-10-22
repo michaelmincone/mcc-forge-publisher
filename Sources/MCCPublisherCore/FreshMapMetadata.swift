@@ -12,6 +12,12 @@ public enum FreshMapMetadata {
         2002: (199, "breakpoint"), 2004: (200, "tempest"), 2001: (198, "anchor_9"),
         3006: (209, "forge_world"), 1510: (202, "highlands"),
     ]
+    public static func mapInfo(for map: ReachMapDocument) throws -> (id: Int, tag: String) {
+        guard let base = maps[map.mapID] else {
+            throw PublisherError.invalidMap("This map's base scenario is not a supported Reach multiplayer map.")
+        }
+        return (base.id, "_map_id_haloreach_" + base.tag)
+    }
     public static func makePlan(map: ReachMapDocument, account: SignedInAccount) throws -> UploadPlan {
         guard map.bytes.dropFirst(map.embeddedLength).allSatisfy({ $0 == 0 }) else {
             throw PublisherError.invalidMap("This file contains provenance or extra metadata that the publisher cannot preserve yet. Use a fresh unsigned export; the original file was not changed.")

@@ -1,6 +1,6 @@
 # How MCC Forge Publisher works
 
-A standalone native macOS app for publishing Halo Reach Forge maps, browsing your MCC File Share, and saving shared map variants to the Mac. The app uses SwiftUI, WebKit, Foundation, CryptoKit, macOS Keychain and system zlib. It does not run Windows binaries, CrossOver, .NET, Node or Python.
+A standalone native macOS app for managing Halo: Reach Forge maps and compiled gametypes, browsing Shared Files, and saving selected files to the Mac. The app uses SwiftUI, WebKit, Foundation, CryptoKit, macOS Keychain and system zlib. It does not run Windows binaries, CrossOver, .NET, Node or Python.
 
 The specs in [research/](../research/) record the protocol details. The reverse-engineering evidence behind them (MCC binary analysis with Ghidra and REA) stays on the author's Mac and is not part of this repository, so some links inside those specs point to files that are not here.
 
@@ -8,12 +8,13 @@ The complete native publishing path has now been verified with the user's legiti
 
 ## Use
 
-1. Open MCC Forge Publisher and choose **Sign in with Microsoft**. Complete Microsoft's sign-in and any MFA in its authorization window.
-2. Drag a `.mvar` file into the app, or select **Choose Map**. Its embedded name and description appear automatically.
-3. Select **Upload to File Share**. The app discovers MCC's current service URLs, checks your account's upload permission, submits the file and checks the resulting download.
-4. Open your File Share in MCC on Xbox to download the map. Xbox acceptance is a separate final check from retrieving the published file on macOS.
+The app presents one **Shared Files** library. Search and file-type filters operate on the signed-in account's maps and gametypes. Account changes clear selections, saved-result links, and previous operation results. The account cannot change while a transfer is running.
 
-The original map is never rewritten. Only its core BLF bytes through `_eof` are uploaded; zero-filled local padding is retained in the original file. Signed or otherwise nonzero trailers are rejected because this first version cannot preserve their provenance safely. The tool supports standard Reach multiplayer map variants with a verified base-map catalog mapping.
+Add multiple Reach `.mvar` maps or compiled `.bin` gametypes through **Upload Files** or drag and drop. The queue displays per-file results and can stop between requests. Successful shared uploads persist receipts; no manual or automatic Check Download feature remains.
+
+Downloads support a single save dialog or a new batch directory. A failed item does not masquerade as a completed file. Per-file results and **Reveal in Finder** show the saved results. Multi-file deletion captures concrete item identities in one confirmation, with Cancel as the default.
+
+The original source files are not rewritten. MCC/Xbox acceptance remains separate from a structurally valid file or successful cloud transfer.
 
 ## Authentication
 
@@ -33,13 +34,19 @@ The upload is a custom PUT with a binary-map prefix followed by UTF-8 JSON metad
 
 The initial upload used `CreatorId = "0"` and the human-readable source basename. Both differed from the recovered native publication path. Correcting those fields and publishing fresh entries produced the successful Xbox downloads. A filename-only edit of the first entry did not resolve the reported download failure, making uploader identity the stronger suspect, but the exact causal field has not been isolated. The map core bytes were not changed to obtain success. [DOWNLOAD_FINDINGS.md](../research/DOWNLOAD_FINDINGS.md) records the failed and successful controls.
 
-The publisher never automatically retries PUT. If a connection fails after submission, check the File Share before retrying, since a lost response can follow a successful publication. A recognized success response records an item ID; retrieving the same bytes by SHA256 provides a stronger verification. Neither result claims that an Xbox console has loaded the map successfully.
+The publisher never automatically retries PUT. If a connection fails after submission, check the File Share before retrying, since a lost response can follow a successful publication. A recognized success response records an item ID and completes the upload. This response does not establish that an Xbox console has loaded the map successfully.
 
-Publication receipts persist locally and match the account and uploaded core hash. Reselecting a previously published map restores its receipt and prevents a duplicate upload. **Check Download** retrieves and verifies that entry without publishing again. It verifies stored bytes, not the Xbox client's import behavior.
+Publication receipts persist locally and match the account and uploaded core hash. Reselecting a previously published map restores its receipt and prevents a duplicate upload. Uploads finish after MCC confirms publication; the app does not automatically retrieve the uploaded file. Older receipts remain readable. Use the File Share browser to download a file when you want a local copy.
+
+## Durable shared-upload recovery
+
+Before calling the shared upload service, the app saves a private local intent containing the account XUID/entity, content kind, core SHA-256, prepared protocol file ID, display title, and preparation date. No credentials, source paths, or payload bytes are stored. A failed journal write prevents submission. A deterministic preflight failure or explicit upload refusal can clear the intent; an uncertain result retains it across restart.
+
+Shared-list refresh reconciles an intent only against one owned row with the same content kind and exact `DisplayProperties.FileName` upload ID. It records a publication receipt before retiring the intent. Missing, duplicated, incomplete, or eventually consistent results leave duplicate protection active. A per-file **Review…** action can search the library or explicitly allow a new attempt after confirmation; it does not upload automatically. **Retry failed** never resets uncertain attempts.
 
 ## File Share browser and downloads
 
-The **File Share** area queries the signed-in account's share directly. It does not derive its list from publication receipts, so maps uploaded elsewhere are included. Only map variants are offered for `.mvar` download. Available catalog metadata supplies names, descriptions, game, base-map identity, sizes, and dates. Missing metadata remains unavailable; duplicate names retain distinct item IDs.
+The **File Share** area queries the signed-in account's share directly. It does not derive its list from publication receipts, so maps uploaded elsewhere are included. Map variants and gametypes are offered with their corresponding `.mvar` and `.bin` extensions. Available catalog metadata supplies names, descriptions, game, base-map identity, sizes, and dates. Missing metadata remains unavailable; duplicate names retain distinct item IDs.
 
 Listing uses `MCCAzureFunctions_GetPlayFabUgcItems` from service discovery with the account's entity ID in both `CreatorEntityId` and `UserEntityId`. Item details use the discovered `MCCAzureFunctions_GetPlayFabUgcItem` route and the existing entity-token authentication. Older saved service configurations receive the known read-only route defaults; supplied routes still pass service URL validation.
 
@@ -48,6 +55,10 @@ The recovered native owned-list request and parser have no pagination loop. The 
 Downloading refreshes the selected catalog item, checks its identity and account ownership, and follows its map-data content URL on a recognized HTTPS host. No remote catalog changes or publication-history writes are made. A native save dialog controls the destination and replacement of an existing file; a failed download or save leaves no completed-looking partial file. The result includes **Reveal in Finder**.
 
 Download validation checks the BLF map envelope independently of the Reach-only upload parser. Halo 3, Reach, Halo 4, and H2A use different map chunk versions; Halo 3 can use an `athr` header without Reach's `chdr`. Payload bytes and existing provenance trailers are preserved. The client does not fabricate signatures. A SHA-256 identifies the saved content; it does not certify the map's gameplay behavior. File structure, byte preservation, editor compatibility, and in-game acceptance are distinct checks.
+
+## Scope
+
+This update manages MCC Shared Files for maps and gametypes. Xbox-local Private Files were explicitly excluded from the requested update and have no category, provider, or placeholder in the app. [PRIVATE_FILES_PROTOCOL.md](PRIVATE_FILES_PROTOCOL.md) preserves the research rationale, including [Halo Support's migration documentation](https://support.halowaypoint.com/hc/en-us/articles/360049447211-Halo-The-Master-Chief-Collection-Legacy-User-Generated-Content-UGC-Support). Legacy-cloud experiments remain outside the shipping package.
 
 ## Deleting a map from File Share
 
@@ -75,7 +86,7 @@ scripts/install-app.sh
 
 The installer copies the app to the current user's Applications directory unchanged, without replacing an unrelated bundle, so both copies share one signature. The build is signed with the hardened runtime. It uses a "Developer ID Application" or "Apple Development" certificate when one is in the keychain (a free Apple Development certificate is available from Xcode > Settings > Accounts), or `MCC_SIGNING_IDENTITY`; otherwise it is ad-hoc signed. With a certificate the signature stays the same across builds and macOS stops asking after updates. The installed copy avoids file-provider attributes added by the synced Documents folder.
 
-The native test script runs Reach map inspection, authentication, publication, publication-history, File Share, deletion, and durable deletion-journal suites. These cover PKCE and request signing, callback rejection, metadata, core/suffix framing, credential binding, endpoint validation, receipt restoration, duplicate protection, share parsing, map download validation, deletion reconciliation, and recovery after local persistence failures. A conditional runner works with Command Line Tools that do not include XCTest. Standard XCTest branches remain available when that framework is installed.
+The native test script runs Reach map and gametype inspection, authentication, publication, publication-history, File Share, deletion, durable deletion/upload journals, and isolated library-model suites. These cover PKCE and request signing, callback rejection, metadata, core/suffix framing, credential binding, endpoint validation, receipt restoration, duplicate protection, share parsing, map download validation, deletion reconciliation, and recovery after local persistence failures. A conditional runner works with Command Line Tools that do not include XCTest. Standard XCTest branches remain available when that framework is installed.
 
 The inspection CLI can be built independently:
 

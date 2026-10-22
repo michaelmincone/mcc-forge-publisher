@@ -1,34 +1,35 @@
 # MCC Forge Publisher
 
-A Mac app for uploading Halo: Reach Forge maps (`.mvar`) to your Halo: The Master Chief Collection File Share, browsing your shared maps, and downloading them to your Mac. No Windows PC is needed.
+A native Mac app for managing Halo: Reach maps (`.mvar`) and compiled gametypes (`.bin`) on your MCC account. Search Shared Files and upload, download, or delete individual files or selections.
 
-## How you use it
+## Manage your library
 
-1. Open **MCC Forge Publisher** and choose **Sign in with Microsoft**. Microsoft's own sign-in window opens; the app never sees your password.
-2. Drag a `.mvar` map onto the app, or click **Choose Map**. Its name and description show up.
-3. Click **Upload to File Share**. The app uploads the map, then downloads it back and checks it arrived unchanged.
-4. On your Xbox, open MCC, go to your File Share and download the map.
+1. Open **MCC Forge Publisher** and choose **Sign in with Microsoft**. Complete Microsoft's sign-in window.
+2. Choose **Shared Files** in the sidebar, then **Refresh**.
+3. Search by name, description, game, type, or item ID. Use the **Maps** and **Gametypes** filters to narrow the results.
+4. Select files with Command or Shift, then choose **Download**. A single file uses a save dialog; a selection goes into a new folder so existing downloads stay intact.
+5. Use **Reveal in Finder** to open the saved result.
 
-Before signing in, fully quit MCC on your Xbox (including Quick Resume). Xbox lets an account use MCC on one device at a time, and the app signs in as MCC, so Xbox refuses it while the game is open (the app shows error `0x8015DC1E`).
+Before signing in, fully quit MCC on your Xbox, including Quick Resume. Xbox permits an account to run MCC on one device at a time; the publisher uses MCC's sign-in, and the game being open can cause error `0x8015DC1E`.
 
-## Download your shared maps
+## Upload maps and gametypes
 
-1. Sign in and open **File Share**.
-2. Click **Refresh** to load the maps on that account's share, including maps uploaded from Xbox, MCC on PC, or another tool.
-3. Select a map, click **Download**, and choose where to save its `.mvar` file.
-4. Use **Reveal in Finder** to find the saved file.
+1. Choose **Shared Files**, then **Upload Files**, or drag several Reach maps and compiled gametypes into the window.
+2. Review the upload queue and choose **Upload**. Each file shows its result.
+3. Choose **Cancel remaining** to stop after the current file. Uploads are never retried automatically.
+4. Open MCC on Xbox to download the published files from Shared Files.
 
-You do not need the original map file or a receipt from this app. The browser shows map variants across MCC titles; uploading still uses the existing Reach validation. Download checks verify the file's structure and saved bytes, rather than whether a particular game or editor can load it. An incomplete listing is explicitly marked; it is never reported as an empty or complete share.
+MCC may take a few minutes to add an accepted upload to its File Share listing. Use **Refresh** to check for it; the saved receipt prevents submitting the same file again while it is appearing.
 
-## Delete a shared map
+The app saves publication receipts to prevent duplicate uploads. It no longer has a Check Download action or an automatic download after uploading. A connection failure after submission can leave an uncertain result. Shared upload recovery records survive restarts and block duplicate submissions. **Refresh** recovers a matching upload by its unique upload ID; **Review…** lets you inspect the library and explicitly allow a fresh attempt if needed. That action only resets the queue entry and never submits it automatically. **Retry failed** resets known failures while keeping uncertain attempts protected.
 
-1. Open **File Share** and select the map you want to remove.
-2. Click **Delete from File Share…**. Check the map's name, game, and item ID in the confirmation.
-3. Choose **Delete from File Share** to remove the shared copy, or **Cancel** to keep it.
+## Delete shared files
 
-The app cannot undo deletion. Download a backup first if you want one. Files already saved on your Mac are kept.
+Select one or more files in **Shared Files**, choose the trash button, and review the named files in the confirmation. Cancel is the default. Shared deletion checks ownership before the request and verifies absence afterward. An uncertain result is retained for read-only checking on **Refresh**; it never triggers an automatic second deletion.
 
-The app checks that the map belongs to the signed-in account and verifies its absence after sending the request once. If the outcome is uncertain, use **Refresh** to check again; the app does not repeat the deletion automatically. Confirmed deletion retires only that map's matching upload receipt, allowing it to be published again. If receipt cleanup fails, Refresh retries the local cleanup while keeping duplicate-upload protection.
+Deleting a shared copy leaves existing downloads on your Mac. Confirmed absence retires only the matching publication receipt. Recovery records survive app restarts and account changes.
+
+An incomplete listing is marked explicitly. Structure and byte checks do not establish whether a file loads or plays correctly in MCC; verify that in the game.
 
 ## What you need
 
@@ -60,11 +61,12 @@ scripts/install-app.sh
 
 The app is installed as `~/Applications/MCC Forge Publisher.app`. Your sign-in is saved in the macOS Keychain. Each new build has a new signature, so after you rebuild, macOS asks once for your Mac password to let the new build read the saved sign-in; choose **Allow** or **Always Allow**.
 
-There is also a command-line tool for checking a map file without uploading it:
+There is also a command-line tool for inspecting a Reach map or gametype without uploading it:
 
 ```bash
 swift build --product mcc-publish
 .build/debug/mcc-publish inspect /path/to/map.mvar
+.build/debug/mcc-publish inspect /path/to/gametype.bin
 ```
 
 The CLI can also list your share and download a map using the app's saved sign-in, without uploading anything:
@@ -72,15 +74,17 @@ The CLI can also list your share and download a map using the app's saved sign-i
 ```bash
 swift build --product mcc-publish
 .build/debug/mcc-publish list
+.build/debug/mcc-publish list "survival"
 .build/debug/mcc-publish download ITEM_ID /absolute/path/to/map.mvar
+.build/debug/mcc-publish download ITEM_ID /absolute/path/to/gametype.bin
 ```
 
 The download command refuses to replace an existing file. The app's save dialog lets you choose whether to replace one.
 
 ## Good to know
 
-- Your original map file is never changed.
-- Uploading handles standard Halo: Reach multiplayer map variants on the stock maps. Downloading does not require the Reach upload parser or a previous publication receipt.
+- Original map and gametype files remain unchanged.
+- Fresh uploads focus on Halo: Reach. Catalog downloads retain support for other MCC map and gametype envelopes; they do not require an earlier publication receipt.
 - It never retries an upload by itself. If a connection drops mid-upload, check your File Share before trying again, because the upload may have gone through.
 - [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) explains the sign-in, the upload protocol and what has been tested, and [research/](research/) holds the protocol specs.
 

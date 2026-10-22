@@ -36,13 +36,13 @@ public struct FileShareDeletionService: Sendable {
             try rejectPreflightMismatch(error)
             let state = await observe(itemID: item.id, credentials: credentials, services: services, allowNotFoundProbe: false)
             if state == .absent {
-                return result(item, credentials, .alreadyAbsent, "This map was already absent from your File Share. No deletion request was sent.")
+                return result(item, credentials, .alreadyAbsent, "This file was already absent from your File Share. No deletion request was sent.")
             }
             try Task.checkCancellation()
-            throw PublisherError.service("The selected map's current ownership and availability could not be verified. No deletion request was sent; refresh the File Share before continuing.")
+            throw PublisherError.service("The selected file's current ownership and availability could not be verified. No deletion request was sent; refresh the File Share before continuing.")
         }
-        guard fresh.id == item.id.lowercased(), fresh.accountXUID == credentials.xuid, fresh.accountEntityID == credentials.entityId else {
-            throw PublisherError.protocolError("The selected File Share map changed identity or ownership. No deletion request was sent; refresh the list.")
+        guard fresh.id == item.id.lowercased(), fresh.accountXUID == credentials.xuid, fresh.accountEntityID == credentials.entityId, fresh.kind == item.kind else {
+            throw PublisherError.protocolError("The selected File Share file changed identity, kind, or ownership. No deletion request was sent; refresh the list.")
         }
         let body = try JSONValue.object(["ItemId": .string(fresh.id)]).encoded()
         try Task.checkCancellation()
@@ -66,13 +66,13 @@ public struct FileShareDeletionService: Sendable {
         let state = await observe(itemID: fresh.id, credentials: credentials, services: services, allowNotFoundProbe: true)
         if state == .absent {
             let outcome: FileShareDeletionResult.Outcome = reply == .refused ? .alreadyAbsent : .deleted
-            return result(fresh, credentials, outcome, "The map is no longer on your File Share. Its absence was confirmed.")
+            return result(fresh, credentials, outcome, "The file is no longer on your File Share. Its absence was confirmed.")
         }
         if reply == .refused {
-            return result(fresh, credentials, .notDeleted, "MCC refused the deletion request. The map was not confirmed absent; refresh the File Share before trying again.")
+            return result(fresh, credentials, .notDeleted, "MCC refused the deletion request. The file was not confirmed absent; refresh the File Share before trying again.")
         }
         if state == .present {
-            return result(fresh, credentials, .uncertain, "Deletion could not be confirmed because the map still appears on your File Share. MCC may still be processing the request; refresh before making another deletion attempt.")
+            return result(fresh, credentials, .uncertain, "Deletion could not be confirmed because the file still appears on your File Share. MCC may still be processing the request; refresh before making another deletion attempt.")
         }
         return result(fresh, credentials, .uncertain, "Deletion could not be confirmed. MCC may have processed the request; refresh your File Share before making another deletion attempt.")
     }
@@ -85,10 +85,10 @@ public struct FileShareDeletionService: Sendable {
         try Task.checkCancellation()
         let state = await observe(itemID: item.id, credentials: credentials, services: services, allowNotFoundProbe: true)
         if state == .absent {
-            return result(item, credentials, .deleted, "The previously requested deletion is now confirmed. The map is no longer on your File Share.")
+            return result(item, credentials, .deleted, "The previously requested deletion is now confirmed. The file is no longer on your File Share.")
         }
         return result(item, credentials, .uncertain, state == .present
-            ? "The map still appears on your File Share. The previous deletion remains unconfirmed."
+            ? "The file still appears on your File Share. The previous deletion remains unconfirmed."
             : "The previous deletion could not be confirmed. Refresh your File Share to check again; no new deletion request was sent.")
     }
 
@@ -99,9 +99,9 @@ public struct FileShareDeletionService: Sendable {
         guard credentials.expiresAt > Date(), !credentials.xuid.isEmpty, !credentials.entityId.isEmpty,
               !credentials.entityToken.isEmpty else { throw AuthError.signInRequired }
         guard item.accountXUID == credentials.xuid, item.accountEntityID == credentials.entityId else {
-            throw PublisherError.authentication("This map belongs to a different signed-in account. Refresh your File Share; no deletion request was sent.")
+            throw PublisherError.authentication("This file belongs to a different signed-in account. Refresh your File Share; no deletion request was sent.")
         }
-        guard UUID(uuidString: item.id) != nil else { throw PublisherError.protocolError("The selected map has an invalid catalog ID. No deletion request was sent.") }
+        guard UUID(uuidString: item.id) != nil else { throw PublisherError.protocolError("The selected file has an invalid catalog ID. No deletion request was sent.") }
         for value in [credentials.entityToken, credentials.entityId] where value.utf8.contains(10) || value.utf8.contains(13) {
             throw PublisherError.authentication("The signed-in account's credentials are invalid. Sign in again; no deletion request was sent.")
         }
@@ -160,7 +160,7 @@ public struct FileShareDeletionService: Sendable {
 
     private static func presence(in root: JSONValue, itemID: String, owner: String) -> Presence {
         guard let body = try? FileShareService.envelope(root), let rows = body["Items"].array else { return .unknown }
-        // Inspect every content type. Absence from the map-filtered UI result
+        // Inspect every content type. Absence from the file-filtered UI result
         // would not prove absence if the same ID now has another content type.
         if rows.contains(where: { $0["Id"].string?.lowercased() == itemID.lowercased() && $0["CreatorEntity"]["Id"].string == owner }) { return .present }
         guard let count = body["Count"].number, count.isFinite, count >= 0, count.rounded() == count,

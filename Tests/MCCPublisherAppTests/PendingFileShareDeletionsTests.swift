@@ -60,6 +60,21 @@ private enum JournalCases {
         }
     }
 
+    static func variantKindMigration() async throws {
+        try await fixture { url in
+            try document([entry()]).encoded().write(to: url)
+            var journal = try PendingFileShareDeletions(url: url)
+            try check(journal.items(accountXUID: accountA, accountEntityID: entityA).first?.kind == .map, "Legacy map intent lost its default kind")
+            let gametype = FileShareItem(id: secondID, title: "Synthetic gametype", accountEntityID: entityA, accountXUID: accountA, kind: .gametype)
+            try journal.record(gametype)
+            let restored = try PendingFileShareDeletions(url: url).items(accountXUID: accountA, accountEntityID: entityA)
+            try check(restored.first(where: { $0.id == firstID })?.kind == .map && restored.first(where: { $0.id == secondID })?.kind == .gametype, "Restart confused map and gametype deletion identities")
+            var invalidKind = entry().object!; invalidKind["kind"] = .string("unknown")
+            try document([.object(invalidKind)]).encoded().write(to: url)
+            try rejects({ _ = try PendingFileShareDeletions(url: url) }, "Unknown kind was accepted as a map deletion")
+        }
+    }
+
     static func accountScope() async throws {
         try await fixture { url in
             var journal = try PendingFileShareDeletions(url: url)
@@ -183,6 +198,7 @@ private enum JournalCases {
 @main struct PendingFileShareDeletionsStandaloneTests {
     static func main() async throws {
         try await JournalCases.roundTrip()
+        try await JournalCases.variantKindMigration()
         try await JournalCases.accountScope()
         try await JournalCases.upsert()
         try await JournalCases.targetedRemove()
@@ -190,7 +206,7 @@ private enum JournalCases {
         try await JournalCases.malformedAndBounded()
         try await JournalCases.permissions()
         try await JournalCases.restoredReadOnlyReconciliation()
-        print("Pending deletion journal tests: 8 cases passed; restart identity recovery, account/entity/item scope, upsert, targeted cleanup, failed-save preservation, bounded malformed JSON, private permissions and mocked read-only reconciliation; no live network or mutation.")
+        print("Pending deletion journal tests: 9 cases passed; kind migration, restart identity recovery, account/entity/item scope, upsert, targeted cleanup, failed-save preservation, bounded malformed JSON, private permissions and mocked read-only reconciliation; no live network or mutation.")
     }
 }
 #endif

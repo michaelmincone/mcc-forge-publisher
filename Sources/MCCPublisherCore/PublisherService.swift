@@ -1,6 +1,13 @@
 import Foundation
 import CryptoKit
 
+public struct PublicationUploadError: LocalizedError, Sendable {
+    public enum Outcome: Sendable { case refused, uncertain }
+    public let outcome: Outcome
+    public let message: String
+    public var errorDescription: String? { message }
+}
+
 public struct PublisherService: Sendable {
     public let http: HTTPClient
     public init(http: HTTPClient = HTTPClient()) { self.http = http }
@@ -22,16 +29,26 @@ public struct PublisherService: Sendable {
         try MCCServiceConfiguration.validate(services.upload)
         try await checkPermission(credentials: credentials, services: services)
         let request = try plan.request(credentials: credentials, services: services)
-        let response = try await http.send(url: services.upload, method: "PUT", headers: request.headers, body: request.body)
+        let response: HTTPResponse
+        do {
+            response = try await http.send(url: services.upload, method: "PUT", headers: request.headers,
+                body: request.body, allowsRedirects: false)
+        } catch let error as HTTPStatusError where (400..<500).contains(error.status) && error.status != 408 {
+            throw PublicationUploadError(outcome: .refused, message: "MCC refused the file upload (HTTP \(error.status)).")
+        } catch {
+            throw PublicationUploadError(outcome: .uncertain,
+                message: "The upload reply was lost or unreadable. Refresh Shared Files before trying again; MCC may have accepted the file.")
+        }
         let result = response.json["result"].string
         guard result == "success", let id = response.json["fileId"].string, !id.isEmpty else {
-            if result == "deniedUpload" { throw PublisherError.service("MCC denied the map upload.") }
-            if result == "signatureNotValid" { throw PublisherError.service("MCC rejected the map's provenance metadata. It was not published.") }
-            throw PublisherError.protocolError("MCC returned an unrecognized upload result. Check your File Share before trying again; the request will not be repeated automatically.")
+            if result == "deniedUpload" { throw PublicationUploadError(outcome: .refused, message: "MCC denied the file upload.") }
+            if result == "signatureNotValid" { throw PublicationUploadError(outcome: .refused, message: "MCC rejected the file's provenance metadata. It was not published.") }
+            throw PublicationUploadError(outcome: .uncertain,
+                message: "MCC returned an unrecognized upload result. Refresh Shared Files before trying again; the request will not be repeated automatically.")
         }
         // Publish success is established by MCC's explicit result, not an HTTP 200 alone.
         let payloadHash = SHA256.hash(data: plan.payload).map { String(format: "%02x", $0) }.joined()
-        return PublicationReceipt(itemID: id, title: plan.map.title, publishedAt: Date(), downloadVerified: false, fileSHA256: payloadHash)
+        return PublicationReceipt(itemID: id, title: plan.title, publishedAt: Date(), downloadVerified: false, fileSHA256: payloadHash)
     }
 
     public func verifyDownload(receipt: PublicationReceipt, credentials: SignedInAccount, services: MCCServiceConfiguration) async throws -> PublicationReceipt {

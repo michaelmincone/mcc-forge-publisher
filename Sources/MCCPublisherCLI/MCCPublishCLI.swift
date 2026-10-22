@@ -8,12 +8,33 @@ struct MCCPublishCLI {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            if args == ["list"] {
-                try await browseOwnShare()
+            if args.first == "list", args.count <= 2 {
+                try await browseOwnShare(search: args.count == 2 ? args[1] : "")
                 return
             }
             if args.count == 3, args[0] == "download" {
                 try await browseOwnShare(itemID: args[1], destination: URL(fileURLWithPath: args[2]))
+                return
+            }
+            if args.count == 2, args[0] == "inspect" {
+                let variant = try ReachVariantDocument.load(from: URL(fileURLWithPath: args[1]))
+                var fields: [String: JSONValue] = [
+                    "title": .string(variant.title), "description": .string(variant.description), "game": .string("HaloReach"),
+                    "kind": .string(variant.kind.rawValue), "fileBytes": .number(Double(variant.bytes.count)),
+                    "embeddedBlfBytes": .number(Double(variant.embeddedLength)), "trailingBytes": .number(Double(variant.trailingByteCount)),
+                    "sha256": .string(variant.sha256),
+                ]
+                switch variant {
+                case .map(let map): fields["scenarioMapId"] = .number(Double(map.mapID)); fields["bodyVersion"] = .number(Double(map.bodyVersion))
+                case .gametype(let game):
+                    fields["engineCategory"] = .number(Double(game.engineCategory))
+                    fields["headerEngineCategory"] = .number(Double(game.headerEngineCategory))
+                    fields["engineType"] = .number(Double(game.engineType)); fields["bodyVersion"] = .number(Double(game.bodyVersion))
+                    if let category = try? FreshGameMetadata.gameCategory(for: game) {
+                        fields["mccGameCategory"] = .number(Double(category.id)); fields["categoryTag"] = .string(category.tag)
+                    }
+                }
+                print(String(decoding: try JSONValue.object(fields).encoded(), as: UTF8.self))
                 return
             }
             if args.count == 3, args[0] == "upload-control" {
@@ -27,10 +48,10 @@ struct MCCPublishCLI {
                 return
             }
             guard args.count == 2, ["inspect", "verify-own", "repair-own-filename", "repair-catalog-filename"].contains(args[0]) else {
-                print("Usage: mcc-publish inspect /absolute/path/to/map.mvar")
+                print("Usage: mcc-publish inspect /absolute/path/to/map.mvar-or-gametype.bin")
                 print("       mcc-publish verify-own /absolute/path/to/map.mvar (read-only)")
-                print("       mcc-publish list (read-only File Share browser)")
-                print("       mcc-publish download ITEM_ID /absolute/path/to/map.mvar")
+                print("       mcc-publish list [SEARCH] (read-only File Share browser)")
+                print("       mcc-publish download ITEM_ID /absolute/path/to/map.mvar-or-gametype.bin")
                 print("Sign-in and publishing are available in MCC Forge Publisher.app.")
                 return
             }
@@ -52,7 +73,7 @@ struct MCCPublishCLI {
     }
 
     /// Uses the same core browser as the app, without writing credentials or publication receipts.
-    private static func browseOwnShare(itemID: String? = nil, destination: URL? = nil) async throws {
+    private static func browseOwnShare(itemID: String? = nil, destination: URL? = nil, search: String = "") async throws {
         guard let account = try await AuthService(persistsCredentials: false).restoreSession() else {
             throw PublisherError.authentication("Sign in using the native app first.")
         }
@@ -61,14 +82,14 @@ struct MCCPublishCLI {
         let service = FileShareService(http: http)
         let listing = try await service.list(credentials: account, services: services)
         if let itemID, let destination {
-            guard destination.pathExtension.lowercased() == "mvar" else {
-                throw PublisherError.invalidMap("Choose a destination with the .mvar extension.")
-            }
             guard !FileManager.default.fileExists(atPath: destination.path) else {
                 throw PublisherError.service("The destination already exists. Choose another filename.")
             }
             guard let item = listing.items.first(where: { $0.id == itemID }) else {
-                throw PublisherError.service(listing.isComplete ? "That map is not on this account's File Share." : "That map was not found in the incomplete File Share results. Refresh in the app.")
+                throw PublisherError.service(listing.isComplete ? "That file is not on this account's File Share." : "That file was not found in the incomplete File Share results. Refresh in the app.")
+            }
+            guard destination.pathExtension.lowercased() == item.kind.fileExtension else {
+                throw PublisherError.invalidMap("Choose a destination with the .\(item.kind.fileExtension) extension.")
             }
             let downloaded = try await service.download(item: item, credentials: account, services: services)
             try downloaded.save(to: destination)
@@ -77,9 +98,10 @@ struct MCCPublishCLI {
                 "sha256": .string(downloaded.sha256), "itemID": .string(item.id)
             ]).encoded(), as: UTF8.self))
         } else {
-            let items = listing.items.map { item in
+            let items = listing.items.filter { $0.matches(search: search) }.map { item in
                 JSONValue.object([
                     "id": .string(item.id), "title": .string(item.title),
+                    "kind": .string(item.kind.rawValue),
                     "game": item.game.map { .string($0) } ?? .null,
                     "baseMap": item.baseMap.map { .string($0) } ?? .null,
                     "fileBytes": item.fileSize.map { .number(Double($0)) } ?? .null,

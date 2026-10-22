@@ -1,18 +1,25 @@
 import Foundation
 
 public struct UploadPlan: Sendable {
-    public let map: ReachMapDocument
+    public let variant: ReachVariantDocument
+    public var map: ReachMapDocument? { if case .map(let map) = variant { return map }; return nil }
+    public var title: String { variant.title }
+    public var kind: VariantKind { variant.kind }
     public let metadata: JSONValue
     public let fileID: String
     public let authorXUID: String
-    public var payload: Data { Data(map.bytes.prefix(map.embeddedLength)) }
+    public var payload: Data { Data(variant.bytes.prefix(variant.embeddedLength)) }
 
     public init(map: ReachMapDocument, metadata: JSONValue, fileID: String, authorXUID: String) throws {
+        try self.init(variant: .map(map), metadata: metadata, fileID: fileID, authorXUID: authorXUID)
+    }
+
+    public init(variant: ReachVariantDocument, metadata: JSONValue, fileID: String, authorXUID: String) throws {
         guard UInt64(authorXUID) != nil, !fileID.isEmpty, fileID.count <= 128,
               fileID.rangeOfCharacter(from: .newlines) == nil else {
             throw PublisherError.protocolError("The publishing identity or file identifier is invalid.")
         }
-        self.map = map; self.metadata = metadata; self.fileID = fileID; self.authorXUID = authorXUID
+        self.variant = variant; self.metadata = metadata; self.fileID = fileID; self.authorXUID = authorXUID
     }
 
     public func request(credentials: SignedInAccount, services: MCCServiceConfiguration) throws -> (headers: [String: String], body: Data) {

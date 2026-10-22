@@ -11,13 +11,14 @@ struct PendingFileShareDeletions {
         let itemID: String
         let title: String
         let game: String?
+        let kind: VariantKind?
         let modifiedAt: Date?
         let accountXUID: String
         let accountEntityID: String
         var key: Key { Key(accountXUID: accountXUID, accountEntityID: accountEntityID, itemID: itemID.lowercased()) }
         var item: FileShareItem {
             FileShareItem(id: itemID, title: title, game: game, modifiedAt: modifiedAt,
-                          accountEntityID: accountEntityID, accountXUID: accountXUID)
+                          accountEntityID: accountEntityID, accountXUID: accountXUID, kind: kind ?? .map)
         }
     }
     private struct Key: Hashable {
@@ -58,7 +59,7 @@ struct PendingFileShareDeletions {
     mutating func record(_ item: FileShareItem) throws {
         guard UUID(uuidString: item.id) != nil else { throw Self.invalidJournal() }
         let entry = Entry(itemID: item.id.lowercased(), title: Self.displayText(item.title, limit: 4096),
-            game: item.game.map { Self.displayText($0, limit: 256) }, modifiedAt: item.modifiedAt,
+            game: item.game.map { Self.displayText($0, limit: 256) }, kind: item.kind, modifiedAt: item.modifiedAt,
             accountXUID: item.accountXUID, accountEntityID: item.accountEntityID)
         guard Self.valid(entry) else { throw Self.invalidJournal() }
         var updated = entries.filter { $0.key != entry.key }
@@ -116,7 +117,7 @@ struct PendingFileShareDeletions {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(object.keys) == ["schemaVersion", "intents"], let intents = object["intents"] as? [[String: Any]],
               intents.count <= maximumEntries else { return false }
-        let allowed: Set<String> = ["itemID", "title", "game", "modifiedAt", "accountXUID", "accountEntityID"]
+        let allowed: Set<String> = ["itemID", "title", "game", "kind", "modifiedAt", "accountXUID", "accountEntityID"]
         return intents.allSatisfy { Set($0.keys).isSubset(of: allowed) }
     }
     private static func invalidJournal() -> PublisherError {

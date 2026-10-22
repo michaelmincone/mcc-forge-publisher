@@ -19,6 +19,7 @@ final class FileShareDeletionTests: XCTestCase {
     func testCancellationBeforeAndAfterDispatch() async throws { try await DeletionCases.cancellation() }
     func testReadOnlyReconciliationCanConfirmLaterAbsence() async throws { try await DeletionCases.reconcile() }
     func testSettingsMigrationAndNativeDeleteRoute() async throws { try await DeletionCases.configuration() }
+    func testGametypeDeletionAndKindMismatch() async throws { try await DeletionCases.gametypes() }
 }
 #endif
 
@@ -50,9 +51,9 @@ private enum DeletionCases {
     static let itemID = "00000000-0000-0000-0000-000000000001"
     static let otherID = "00000000-0000-0000-0000-000000000002"
     static let account = SignedInAccount(xuid: "SYNTHETIC_XUID", gamertag: "Synthetic", sessionTicket: "FAKE_SESSION_TICKET", entityToken: "FAKE_ENTITY_TOKEN", entityId: "SYNTHETIC_ENTITY", expiresAt: .distantFuture)
-    static func item(id: String = itemID, xuid: String = account.xuid, entity: String = account.entityId) -> FileShareItem {
+    static func item(id: String = itemID, xuid: String = account.xuid, entity: String = account.entityId, kind: VariantKind = .map) -> FileShareItem {
         FileShareItem(id: id, title: "Synthetic selected map", description: "", game: "Halo 3", baseMap: nil, fileSize: nil, modifiedAt: nil,
-            accountEntityID: entity, accountXUID: xuid, gameEngine: "2", baseMapID: nil)
+            accountEntityID: entity, accountXUID: xuid, gameEngine: "2", baseMapID: nil, kind: kind)
     }
     static func config() throws -> MCCServiceConfiguration {
         try MCCServiceConfiguration(upload: URL(string: "https://mcc-production.azurefd.net/test/upload")!, permission: URL(string: "https://mcc-production.azurefd.net/test/permission")!,
@@ -134,6 +135,27 @@ private enum DeletionCases {
         }
         let client = service { _ in try json(.object(["error": .string("NotAuthorized")]), status: 401) }
         try await rejects({ _ = try await client.delete(item: item(), credentials: account, services: config()) }, "Authentication refusal was accepted")
+    }
+
+    static func gametypes() async throws {
+        var mutations = 0
+        let client = service { request in
+            switch request.url?.path {
+            case "/test/detail": return try json(details(row(type: "GameVariant")))
+            case "/test/delete": mutations += 1; return .init()
+            default: return try json(listing())
+            }
+        }
+        let result = try await client.delete(item: item(kind: .gametype), credentials: account, services: config())
+        try check(result.confirmedAbsent && mutations == 1, "Owned gametype was not deleted exactly once and reconciled")
+
+        mutations = 0
+        let mismatch = service { request in
+            if request.url?.path == "/test/delete" { mutations += 1 }
+            return try json(details(row(type: "MapVariant")))
+        }
+        try await rejects({ _ = try await mismatch.delete(item: item(kind: .gametype), credentials: account, services: config()) }, "Gametype selection accepted a fresh map of the same ID")
+        try check(mutations == 0, "Changed content kind dispatched a deletion")
     }
 
     static func alreadyAbsent() async throws {
@@ -351,7 +373,8 @@ private enum DeletionCases {
         try await DeletionCases.cancellation()
         try await DeletionCases.reconcile()
         try await DeletionCases.configuration()
-        print("File Share deletion tests: 15 cases passed; mocked native contract, account binding, fresh owned-map preflight, complete-list/all-type absence, exact ItemNotFound, refusals, stale/ambiguous replies, one mutation, read-only reconciliation, cancellation and settings migration; no live mutation or network.")
+        try await DeletionCases.gametypes()
+        print("File Share deletion tests: 16 cases passed; mocked native contract, account binding, fresh owned-file preflight, map and gametype kinds, complete-list/all-type absence, exact ItemNotFound, refusals, stale/ambiguous replies, one mutation, read-only reconciliation, cancellation and settings migration; no live mutation or network.")
     }
 }
 #endif
